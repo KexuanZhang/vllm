@@ -76,6 +76,9 @@ class EngineCore:
                     VLLM_VERSION, vllm_config)
 
         self.log_stats = log_stats
+        
+        # Initialize step counter for stats logging
+        self._step_counter = 0
 
         # Setup Model.
         self.model_executor = executor_class(vllm_config)
@@ -157,6 +160,70 @@ class EngineCore:
 
             self.request_block_hasher = get_request_block_hasher(
                 block_size, caching_hash_fn)
+
+    def get_stats(self) -> Optional[SchedulerStats]:
+        """Get current scheduler statistics for offline inference monitoring.
+        
+        Returns:
+            SchedulerStats object containing KV cache usage, prefix hit rates,
+            and request queue information, or None if not available.
+        """
+        if hasattr(self.scheduler, 'make_stats'):
+            return self.scheduler.make_stats()
+        else:
+            logger.warning("Stats not available from scheduler")
+            return None
+    
+    def log_inference_stats(self, step_num: Optional[int] = None, prefix: str = ""):
+        """Log detailed inference statistics.
+        
+        Args:
+            step_num: Current inference step number (uses internal counter if None)
+            prefix: Optional prefix for log messages
+        """
+        if step_num is None:
+            step_num = self._step_counter
+            
+        stats = self.get_stats()
+        if stats is None:
+            logger.warning(f"{prefix}Stats not available at step {step_num}")
+            return
+            
+        # Log KV cache usage
+        if hasattr(stats, 'kv_cache_usage'):
+            cache_usage_pct = stats.kv_cache_usage * 100
+            logger.info(f"{prefix}Step {step_num}: GPU KV Cache Usage: {cache_usage_pct:.2f}%")
+        
+        # Log prefix cache hit rate
+        if hasattr(stats, 'prefix_cache_stats') and stats.prefix_cache_stats:
+            prefix_stats = stats.prefix_cache_stats
+            if prefix_stats.queries > 0:
+                hit_rate_pct = (prefix_stats.hits / prefix_stats.queries) * 100
+                logger.info(f"{prefix}Step {step_num}: Prefix Cache Hit Rate: {hit_rate_pct:.2f}% "
+                           f"({prefix_stats.hits}/{prefix_stats.queries})")
+            else:
+                logger.info(f"{prefix}Step {step_num}: Prefix Cache: No queries yet")
+        
+        # Log request queue stats
+        if hasattr(stats, 'num_running_reqs'):
+            logger.info(f"{prefix}Step {step_num}: Running Requests: {stats.num_running_reqs}")
+        
+        if hasattr(stats, 'num_waiting_reqs'):
+            logger.info(f"{prefix}Step {step_num}: Waiting Requests: {stats.num_waiting_reqs}")
+            
+        # Additional useful metrics
+        if hasattr(stats, 'num_corrupted_reqs') and stats.num_corrupted_reqs > 0:
+            logger.warning(f"{prefix}Step {step_num}: Corrupted Requests: {stats.num_corrupted_reqs}")
+            
+        # Log speculative decoding stats if available
+        if hasattr(stats, 'spec_decoding_stats') and stats.spec_decoding_stats:
+            spec_stats = stats.spec_decoding_stats
+            logger.info(f"{prefix}Step {step_num}: Spec Decoding - "
+                       f"Accepted: {getattr(spec_stats, 'accepted_tokens', 'N/A')}, "
+                       f"Rejected: {getattr(spec_stats, 'rejected_tokens', 'N/A')}")
+            
+        # Log all available stats for debugging (only at debug level)
+        logger.debug(f"{prefix}Step {step_num}: Full Stats: {stats}")
 
     def _initialize_kv_caches(
             self, vllm_config: VllmConfig) -> tuple[int, int, KVCacheConfig]:
@@ -294,8 +361,13 @@ class EngineCore:
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)  # type: ignore
 
-        return (engine_core_outputs,
-                scheduler_output.total_num_scheduled_tokens > 0)
+        # Increment step counter and log stats if enabled
+        self._step_counter += 1
+        model_executed = scheduler_output.total_num_scheduled_tokens > 0
+        if self.log_stats and model_executed:
+            self.log_inference_stats(step_num=self._step_counter)
+
+        return (engine_core_outputs, model_executed)
 
     def post_step(self, model_executed: bool) -> None:
         if self.use_spec_decode and model_executed:
