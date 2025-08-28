@@ -53,6 +53,11 @@ pip install -U pip setuptools wheel
 pip install ninja  # For faster compilation
 pip install packaging  # Required for setup
 
+# Add both the vLLM directory and the project directory to PYTHONPATH
+echo "🔧 Updating PYTHONPATH..."
+export PYTHONPATH="$PYTHONPATH:/Users/zhang/Desktop/huawei/so1/vllm:/Users/zhang/Desktop/huawei/so1/semantic-operators/ggr-experiment-pipeline"
+echo "   PYTHONPATH updated: $PYTHONPATH"
+
 # Install in development mode
 echo "🔨 Installing modified vLLM in development mode..."
 cd "$VLLM_DIR"
