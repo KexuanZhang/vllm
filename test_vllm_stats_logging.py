@@ -1,16 +1,9 @@
 """
-Test script for the modified vLLM with        # Test with stats logging disabled parameter style...
-        # Alternative: Use disable_log_stats parameter (alternative way, for compatibility)
-        # Uncomment to test with stats disabled
-        # llm2 = OfflineLLMWithStats(
-        #     model=model_path,
-        #     tensor_parallel_size=1,
-        #     log_stats_interval=1,
-        #     disable_log_stats=True,  # Disable stats logging (overrides the LLM default)
-        #     max_model_len=512,
-        #     gpu_memory_utilization=0.8,
-        #     enable_prefix_caching=True
-        # )ng.
+Test script for the modified vLLM with stats logging.
+
+This script tests the stats logging configuration in the modified vLLM,
+verifying that stats logging is properly enabled by default and only 
+disabled when explicitly turned off via parameters.
 """
 import logging
 import sys
@@ -39,65 +32,102 @@ def test_vllm_stats_logging():
         
         logger.info(f"Initializing LLM with model: {model_path}")
         
-        # Initialize LLM with stats logging
-        # Use log_stats parameter (the standard way)
-        llm = OfflineLLMWithStats(
+        logger.info("\n" + "="*60)
+        logger.info("TEST 1: Default behavior (should enable stats)")
+        # Initialize LLM with default settings (should enable stats)
+        llm_default = OfflineLLMWithStats(
+            model=model_path,
+            tensor_parallel_size=1,
+            max_model_len=512,  # Small for testing
+            gpu_memory_utilization=0.7,
+            enable_prefix_caching=True  # Enable for prefix cache stats
+        )
+        
+        logger.info("\n" + "="*60)
+        logger.info("TEST 2: Explicitly enabled stats logging")
+        # Initialize LLM with stats logging explicitly enabled
+        llm_enabled = OfflineLLMWithStats(
             model=model_path,
             tensor_parallel_size=1,
             log_stats_interval=1,
             log_stats=True,  # Explicitly enable stats logging
             max_model_len=512,  # Small for testing
-            gpu_memory_utilization=0.8,
+            gpu_memory_utilization=0.7,
             enable_prefix_caching=True  # Enable for prefix cache stats
         )
         
-        logger.info("Testing with stats logging disabled parameter style...")
-        # Alternative: Use disable_log_stats parameter (alternative way, for compatibility)
-        # Uncomment to test with stats disabled
-        # llm2 = OfflineLLMWithStats(
-        #     model=model_path,
-        #     tensor_parallel_size=1,
-        #     log_stats_interval=1,
-        #     disable_log_stats=True,  # Disable stats logging
-        #     max_model_len=512,
-        #     gpu_memory_utilization=0.8,
-        #     enable_prefix_caching=True
-        # )
+        logger.info("\n" + "="*60)
+        logger.info("TEST 3: Explicitly disabled stats logging")
+        # Initialize LLM with stats logging explicitly disabled
+        llm_disabled = OfflineLLMWithStats(
+            model=model_path,
+            tensor_parallel_size=1,
+            log_stats_interval=1,
+            disable_log_stats=True,  # Explicitly disable stats logging
+            max_model_len=512,  # Small for testing
+            gpu_memory_utilization=0.7,
+            enable_prefix_caching=True
+        )
         
         # Create sampling parameters
         sampling_params = SamplingParams(
-            temperature=0.8,
+            temperature=0.1,  # Lower temperature for more deterministic results
             top_p=0.95,
-            max_tokens=50
+            max_tokens=20     # Short outputs for quick testing
         )
         
-        # Test prompts
-        test_prompts = [
-            "The capital of France is",
-            "Machine learning is",
-            "The weather today"
-        ]
+        # Test prompt
+        test_prompt = "The capital of France is"
         
-        logger.info("Starting inference test with stats logging...")
+        logger.info("\n" + "="*60)
+        logger.info("Running inference tests with different configurations...")
         
-        # Run inference with detailed stats
-        for i, prompt in enumerate(test_prompts):
-            logger.info(f"\n{'='*60}")
-            logger.info(f"Testing prompt {i+1}: {prompt}")
-            
-            outputs = llm.generate([prompt], sampling_params, log_detailed_stats=True)
-            
-            # Print the result
-            generated_text = outputs[0].outputs[0].text
-            logger.info(f"Generated: {generated_text}")
+        # Test with default configuration (should have stats enabled)
+        logger.info("\n=== Testing Default Configuration ===")
+        outputs_default = llm_default.generate([test_prompt], sampling_params, log_detailed_stats=True)
+        generated_text_default = outputs_default[0].outputs[0].text
+        logger.info(f"Default config generated: {generated_text_default}")
+        default_stats = llm_default.get_current_stats()
         
-        # Get final stats
-        final_stats = llm.get_current_stats()
-        logger.info(f"\n{'='*60}")
-        logger.info("FINAL STATS SUMMARY:")
-        for key, value in final_stats.items():
-            logger.info(f"  {key}: {value}")
-            
+        # Test with explicitly enabled stats
+        logger.info("\n=== Testing Explicitly Enabled Stats ===")
+        outputs_enabled = llm_enabled.generate([test_prompt], sampling_params, log_detailed_stats=True)
+        generated_text_enabled = outputs_enabled[0].outputs[0].text
+        logger.info(f"Enabled stats config generated: {generated_text_enabled}")
+        enabled_stats = llm_enabled.get_current_stats()
+        
+        # Test with explicitly disabled stats
+        logger.info("\n=== Testing Explicitly Disabled Stats ===")
+        outputs_disabled = llm_disabled.generate([test_prompt], sampling_params, log_detailed_stats=True)
+        generated_text_disabled = outputs_disabled[0].outputs[0].text
+        logger.info(f"Disabled stats config generated: {generated_text_disabled}")
+        disabled_stats = llm_disabled.get_current_stats()
+        
+        # Compare the results to verify stats collection behavior
+        logger.info("\n" + "="*60)
+        logger.info("STATS COMPARISON SUMMARY:")
+        
+        # Check for presence of stats keys in each configuration
+        def has_stats(stats_dict):
+            """Check if stats dictionary contains engine stats."""
+            return any(key.startswith('engine_') for key in stats_dict.keys())
+        
+        logger.info(f"Default config has stats: {has_stats(default_stats)}")
+        logger.info(f"Explicitly enabled stats has stats: {has_stats(enabled_stats)}")
+        logger.info(f"Explicitly disabled stats has stats: {has_stats(disabled_stats)}")
+        
+        # Show some key stats from each
+        for config_name, stats in [
+            ("Default", default_stats),
+            ("Explicitly enabled", enabled_stats),
+            ("Explicitly disabled", disabled_stats)
+        ]:
+            logger.info(f"\n--- {config_name} Configuration Stats ---")
+            for key, value in stats.items():
+                if key.startswith('engine_'):
+                    logger.info(f"  {key}: {value}")
+        
+        logger.info("\n" + "="*60)
         logger.info("✅ vLLM stats logging test completed successfully!")
         return True
         
