@@ -18,7 +18,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def test_model_generation(model_path, tensor_parallel_size=1, prompt="Hi", max_tokens=100):
+def test_model_generation(model_path, tensor_parallel_size=1, prompt="Hi", max_tokens=100, 
+                     max_model_len=4096, gpu_memory_utilization=0.7):
     """Test if a model can generate responses."""
     try:
         # Import vLLM
@@ -35,8 +36,9 @@ def test_model_generation(model_path, tensor_parallel_size=1, prompt="Hi", max_t
         for i in range(torch.cuda.device_count()):
             logger.info(f"GPU {i}: {torch.cuda.get_device_name(i)}")
         
-        # Set memory utilization to avoid OOM errors
-        gpu_memory_utilization = 0.7  # Use 70% of GPU memory
+        # Log memory configuration
+        logger.info(f"GPU memory utilization: {gpu_memory_utilization:.2f}")
+        logger.info(f"Max model context length: {max_model_len}")
         
         # Initialize the LLM
         logger.info(f"Loading model from: {model_path}")
@@ -46,7 +48,11 @@ def test_model_generation(model_path, tensor_parallel_size=1, prompt="Hi", max_t
         start_time = time.time()
         llm = LLM(model=model_path, 
                  gpu_memory_utilization=gpu_memory_utilization,
-                 tensor_parallel_size=tensor_parallel_size)
+                 tensor_parallel_size=tensor_parallel_size,
+                 max_model_len=max_model_len,
+                 dtype="auto",  # Let vLLM choose the best dtype based on model and GPU
+                 enforce_eager=False,  # Compile model with torch.compile for faster inference
+                 swap_space=1 << 30)   # 1 GB swap space for GPU memory efficiency
         load_time = time.time() - start_time
         logger.info(f"Model loaded in {load_time:.2f} seconds")
         
@@ -91,6 +97,10 @@ def main():
     parser.add_argument("--tensor-parallel-size", type=int, help="Number of GPUs to use for tensor parallelism")
     parser.add_argument("--prompt", type=str, default="Hi", help="Test prompt to send to the model")
     parser.add_argument("--max-tokens", type=int, default=100, help="Maximum number of tokens to generate")
+    parser.add_argument("--max-model-len", type=int, default=4096, 
+                       help="Maximum sequence length for the model (default: 4096)")
+    parser.add_argument("--gpu-memory", type=float, default=0.7,
+                       help="Fraction of GPU memory to use (default: 0.7)")
     
     args = parser.parse_args()
     
@@ -118,7 +128,9 @@ def main():
         model_path=args.model_path,
         tensor_parallel_size=args.tensor_parallel_size,
         prompt=args.prompt,
-        max_tokens=args.max_tokens
+        max_tokens=args.max_tokens,
+        max_model_len=args.max_model_len,
+        gpu_memory_utilization=args.gpu_memory
     )
     
     if success:
