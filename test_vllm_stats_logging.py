@@ -29,14 +29,29 @@ def test_vllm_stats_logging():
         logger.info(f"Initializing LLM with model: {model_path}")
         
         # Initialize LLM with stats logging
+        # Use log_stats parameter (the standard way)
         llm = OfflineLLMWithStats(
             model=model_path,
             tensor_parallel_size=1,
             log_stats_interval=1,
+            log_stats=True,  # Explicitly enable stats logging
             max_model_len=512,  # Small for testing
             gpu_memory_utilization=0.8,
             enable_prefix_caching=True  # Enable for prefix cache stats
         )
+        
+        logger.info("Testing with stats logging disabled parameter style...")
+        # Alternative: Use disable_log_stats parameter (alternative way, for compatibility)
+        # Uncomment to test with stats disabled
+        # llm2 = OfflineLLMWithStats(
+        #     model=model_path,
+        #     tensor_parallel_size=1,
+        #     log_stats_interval=1,
+        #     disable_log_stats=True,  # Disable stats logging
+        #     max_model_len=512,
+        #     gpu_memory_utilization=0.8,
+        #     enable_prefix_caching=True
+        # )
         
         # Create sampling parameters
         sampling_params = SamplingParams(

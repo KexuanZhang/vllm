@@ -17,6 +17,7 @@ class OfflineLLMWithStats:
                  tensor_parallel_size: int = 1,
                  log_stats_interval: int = 1,  # Log stats every N requests
                  log_stats: bool = True,  # Flag to enable stats logging (not passed to LLM)
+                 disable_log_stats: bool = False,  # Alternative way to control logging
                  **kwargs):
         """
         Initialize the LLM with stats logging enabled.
@@ -26,15 +27,20 @@ class OfflineLLMWithStats:
             tensor_parallel_size: Number of GPUs for tensor parallelism
             log_stats_interval: How often to log stats (every N requests)
             log_stats: Whether to log stats (not passed to LLM)
+            disable_log_stats: Alternative way to disable stats (overrides log_stats)
             **kwargs: Additional arguments passed to LLM constructor
         """
-        # Store log_stats setting but don't pass it to LLM
-        self._log_stats = log_stats
+        # Handle both log_stats and disable_log_stats parameters
+        self._log_stats = log_stats and not disable_log_stats
         
         # Filter out our custom parameters that aren't accepted by EngineArgs
         llm_kwargs = kwargs.copy()
         if 'log_stats' in llm_kwargs:
             llm_kwargs.pop('log_stats')
+        if 'disable_log_stats' in llm_kwargs:
+            llm_kwargs.pop('disable_log_stats')
+        
+        logger.info(f"Initializing OfflineLLMWithStats with stats logging {'enabled' if self._log_stats else 'disabled'}")
         
         self.llm = LLM(model=model, 
                       tensor_parallel_size=tensor_parallel_size, 
@@ -63,11 +69,8 @@ class OfflineLLMWithStats:
             
         start_time = time.time()
         
-        # Only log stats if the master log_stats setting is enabled
-        should_log = getattr(self, '_log_stats', True) and log_detailed_stats
-        
-        # Log pre-generation stats
-        if should_log:
+        # Log pre-generation stats if enabled
+        if self._log_stats and log_detailed_stats:
             logger.info(f"=== Pre-Generation Stats (Batch size: {len(prompts)}) ===")
             self._log_engine_stats("PRE-GEN")
         
@@ -79,12 +82,8 @@ class OfflineLLMWithStats:
         self._total_inference_time += inference_time
         self._request_counter += len(prompts)
         
-        # Log post-generation stats if logging is enabled
-        should_log = getattr(self, '_log_stats', True) and (
-            log_detailed_stats or (self._request_counter % self.log_stats_interval == 0)
-        )
-        
-        if should_log:
+        # Log post-generation stats if enabled
+        if self._log_stats and (log_detailed_stats or (self._request_counter % self.log_stats_interval == 0)):
             logger.info(f"=== Post-Generation Stats ===")
             self._log_engine_stats("POST-GEN")
             self._log_performance_stats(len(prompts), inference_time)
@@ -93,6 +92,9 @@ class OfflineLLMWithStats:
     
     def _log_engine_stats(self, prefix: str = ""):
         """Log detailed engine statistics."""
+        if not self._log_stats:
+            return
+            
         try:
             # Access the engine core to get stats
             if hasattr(self.llm, 'llm_engine'):
@@ -212,6 +214,9 @@ class OfflineLLMWithStats:
     
     def _log_performance_stats(self, batch_size: int, inference_time: float):
         """Log performance statistics."""
+        if not self._log_stats:
+            return
+            
         throughput = batch_size / inference_time if inference_time > 0 else 0
         avg_time_per_request = self._total_inference_time / self._request_counter if self._request_counter > 0 else 0
         
@@ -227,13 +232,14 @@ class OfflineLLMWithStats:
         stats_dict = {
             'total_requests': self._request_counter,
             'total_inference_time': self._total_inference_time,
-            'avg_time_per_request': self._total_inference_time / max(1, self._request_counter)
+            'avg_time_per_request': self._total_inference_time / max(1, self._request_counter),
+            'stats_logging_enabled': self._log_stats
         }
         
-        # Only attempt to get detailed engine stats if logging is enabled
-        if not getattr(self, '_log_stats', True):
+        # If stats logging is disabled, return only basic stats
+        if not self._log_stats:
             return stats_dict
-            
+        
         try:
             if hasattr(self.llm, 'llm_engine'):
                 engine = self.llm.llm_engine
