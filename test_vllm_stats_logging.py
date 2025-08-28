@@ -1,5 +1,16 @@
 """
-Test script for the modified vLLM with stats logging.
+Test script for the modified vLLM with        # Test with stats logging disabled parameter style...
+        # Alternative: Use disable_log_stats parameter (alternative way, for compatibility)
+        # Uncomment to test with stats disabled
+        # llm2 = OfflineLLMWithStats(
+        #     model=model_path,
+        #     tensor_parallel_size=1,
+        #     log_stats_interval=1,
+        #     disable_log_stats=True,  # Disable stats logging (overrides the LLM default)
+        #     max_model_len=512,
+        #     gpu_memory_utilization=0.8,
+        #     enable_prefix_caching=True
+        # )ng.
 """
 import logging
 import sys

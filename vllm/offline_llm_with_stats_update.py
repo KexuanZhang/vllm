@@ -37,10 +37,13 @@ class OfflineLLMWithStats:
         llm_kwargs = kwargs.copy()
         if 'log_stats' in llm_kwargs:
             llm_kwargs.pop('log_stats')
-        if 'disable_log_stats' in llm_kwargs:
-            llm_kwargs.pop('disable_log_stats')
         
-        logger.info(f"Initializing OfflineLLMWithStats with stats logging {'enabled' if self._log_stats else 'disabled'}")
+        # IMPORTANT: We need to explicitly set disable_log_stats=False to override the 
+        # default behavior in the LLM class which forces disable_log_stats=True
+        llm_kwargs['disable_log_stats'] = not self._log_stats
+        
+        # Log a clear message showing the current status
+        logger.info(f"Initializing OfflineLLMWithStats with stats logging {'ENABLED' if self._log_stats else 'DISABLED'}")
         
         self.llm = LLM(model=model, 
                       tensor_parallel_size=tensor_parallel_size, 
