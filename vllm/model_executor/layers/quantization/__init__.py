@@ -35,6 +35,7 @@ QuantizationMethods = Literal[
     "inc",
     "mxfp4",
     "petit_nvfp4",
+    "kvtuner",
 ]
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -104,6 +105,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
     from .hqq_marlin import HQQMarlinConfig
     from .inc import INCConfig
     from .ipex_quant import IPEXConfig
+    from .kvtuner import KVTunerConfig
     from .modelopt import ModelOptFp8Config, ModelOptNvFp4Config
     from .moe_wna16 import MoeWNA16Config
     from .mxfp4 import Mxfp4Config
@@ -142,6 +144,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
         "inc": INCConfig,
         "mxfp4": Mxfp4Config,
         "petit_nvfp4": PetitNvFp4Config,
+        "kvtuner": KVTunerConfig,
     }
     # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)

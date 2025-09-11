@@ -122,6 +122,14 @@ class CacheConfig:
     gpu_memory_memory_utilization. Note that kv_cache_memory_bytes
     (when not-None) ignores gpu_memory_utilization"""
 
+    # KVTuner configuration fields  
+    kvtuner_config_path: Optional[str] = None
+    """Path to KVTuner preset configuration YAML file for per-layer quantization."""
+    kvtuner_scheme: str = "per_token"
+    """KVTuner quantization scheme. Options: 'per_token', 'per_channel'."""
+    kvtuner_backend: str = "vanilla"
+    """KVTuner backend. Options: 'vanilla', 'quanto', 'hqq'."""
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,

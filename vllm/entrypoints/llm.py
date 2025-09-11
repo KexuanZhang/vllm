@@ -157,6 +157,13 @@ class LLM:
         compilation_config: Either an integer or a dictionary. If it is an
             integer, it is used as the level of compilation optimization. If it
             is a dictionary, it can specify the full compilation configuration.
+        kvtuner_config_path: Path to KVTuner preset configuration YAML file.
+            When using quantization="kvtuner", this specifies the per-layer
+            quantization configuration.
+        kvtuner_scheme: KVTuner quantization scheme. Options: "per_token",
+            "per_channel". Defaults to "per_token".
+        kvtuner_backend: KVTuner backend. Options: "vanilla", "quanto", "hqq".
+            Defaults to "vanilla".
         **kwargs: Arguments for [`EngineArgs`][vllm.EngineArgs].
 
     Note:
@@ -197,6 +204,9 @@ class LLM:
                                            CompilationConfig]] = None,
         logits_processors: Optional[list[Union[str,
                                                type[LogitsProcessor]]]] = None,
+        kvtuner_config_path: Optional[str] = None,
+        kvtuner_scheme: str = "per_token",
+        kvtuner_backend: str = "vanilla",
         **kwargs: Any,
     ) -> None:
         """LLM constructor."""
@@ -273,6 +283,9 @@ class LLM:
             override_pooler_config=override_pooler_config,
             compilation_config=compilation_config_instance,
             logits_processors=logits_processors,
+            kvtuner_config_path=kvtuner_config_path,
+            kvtuner_scheme=kvtuner_scheme,
+            kvtuner_backend=kvtuner_backend,
             **kwargs,
         )
 

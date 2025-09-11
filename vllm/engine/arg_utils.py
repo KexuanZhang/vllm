@@ -448,6 +448,11 @@ class EngineArgs:
     mamba_cache_dtype: MambaDType = CacheConfig.mamba_cache_dtype
     mamba_ssm_cache_dtype: MambaDType = CacheConfig.mamba_ssm_cache_dtype
 
+    # KVTuner configuration options
+    kvtuner_config_path: Optional[str] = None
+    kvtuner_scheme: str = "per_token"
+    kvtuner_backend: str = "vanilla"
+
     additional_config: dict[str, Any] = \
         get_field(VllmConfig, "additional_config")
     reasoning_parser: str = DecodingConfig.reasoning_backend
@@ -1196,6 +1201,9 @@ class EngineArgs:
             kv_sharing_fast_prefill=self.kv_sharing_fast_prefill,
             mamba_cache_dtype=self.mamba_cache_dtype,
             mamba_ssm_cache_dtype=self.mamba_ssm_cache_dtype,
+            kvtuner_config_path=self.kvtuner_config_path,
+            kvtuner_scheme=self.kvtuner_scheme,
+            kvtuner_backend=self.kvtuner_backend,
         )
 
         ray_runtime_env = None
