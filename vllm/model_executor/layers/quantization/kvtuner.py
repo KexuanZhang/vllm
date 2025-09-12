@@ -35,6 +35,7 @@ class KVTunerConfig(QuantizationConfig):
         axis_key: int = 0,
         axis_value: int = 0,
         asym: bool = False,
+        per_layer_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize KVTuner configuration.
         
@@ -49,6 +50,7 @@ class KVTunerConfig(QuantizationConfig):
             axis_key: Axis for key quantization (0: per-token, 1: per-channel)
             axis_value: Axis for value quantization (0: per-token, 1: per-channel)
             asym: Whether to use asymmetric quantization
+            per_layer_config: Dictionary containing per-layer quantization configurations
         """
         self.kvtuner_config_path = kvtuner_config_path
         self.kvtuner_scheme = kvtuner_scheme
@@ -61,14 +63,23 @@ class KVTunerConfig(QuantizationConfig):
         self.axis_value = axis_value
         self.asym = asym
         
-        # Load per-layer configuration if config path is provided
+        # Initialize per-layer configuration
         self.per_layer_config = {}
-        if kvtuner_config_path and os.path.exists(kvtuner_config_path):
+        
+        # If per_layer_config is provided directly (e.g., from from_config), use it
+        if per_layer_config is not None:
+            self.per_layer_config = per_layer_config
+            logger.info(f"Using provided per-layer config with {len(per_layer_config)} layers")
+        # Otherwise, try to load from config path if provided
+        elif kvtuner_config_path and os.path.exists(kvtuner_config_path):
             try:
                 with open(kvtuner_config_path, 'r') as f:
-                    self.per_layer_config = yaml.safe_load(f)
+                    loaded_config = yaml.safe_load(f)
+                # Convert numeric keys to strings for consistency
+                for key, value in loaded_config.items():
+                    self.per_layer_config[str(key)] = value
                 logger.info(f"Loaded KVTuner config from {kvtuner_config_path}")
-                logger.info(f"Per-layer config: {self.per_layer_config}")
+                logger.info(f"Per-layer config: {len(self.per_layer_config)} layers")
             except Exception as e:
                 logger.warning(f"Failed to load KVTuner config from {kvtuner_config_path}: {e}")
                 self.per_layer_config = {}
@@ -90,7 +101,21 @@ class KVTunerConfig(QuantizationConfig):
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "KVTunerConfig":
         """Create KVTunerConfig from a dictionary."""
-        return cls(**config)
+        # KVTuner YAML configs have numeric keys (layer indices) representing per-layer configurations
+        # The entire config dict IS the per-layer config, so we convert numeric keys to strings
+        per_layer_config = {}
+        
+        # Convert all keys to strings to ensure compatibility
+        for key, value in config.items():
+            # Convert numeric keys to strings for consistency
+            str_key = str(key)
+            per_layer_config[str_key] = value
+        
+        # Create KVTunerConfig with the per-layer configuration
+        return cls(
+            kvtuner_config_path=None,  # Config is already loaded from file
+            per_layer_config=per_layer_config
+        )
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
