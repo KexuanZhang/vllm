@@ -10,7 +10,7 @@ import torch
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig)
+    QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 
 logger = init_logger(__name__)
@@ -91,6 +91,23 @@ class KVTunerConfig(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "KVTunerConfig":
         """Create KVTunerConfig from a dictionary."""
         return cls(**config)
+
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["QuantizeMethodBase"]:
+        """Get the quantize method to use for the quantized layer.
+        
+        Args:
+            layer: The layer for the quant method.
+            prefix: The full name of the layer in the state dict
+        Returns:
+            The quantize method. For KVTuner, this returns None for most layers
+            since KVTuner primarily handles KV cache quantization through the
+            KV cache method rather than weight quantization.
+        """
+        # KVTuner is primarily a KV cache quantization method,
+        # not a weight quantization method, so we return None for most layers.
+        # The KV cache quantization is handled through get_kv_cache_method()
+        return None
 
     def get_kv_cache_method(self) -> "KVTunerKVCacheMethod":
         """Get KV cache method for KVTuner quantization."""
