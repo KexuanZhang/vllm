@@ -98,8 +98,8 @@ class GPTQConfig(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 60
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return ["quantize_config.json"]
 
     @classmethod

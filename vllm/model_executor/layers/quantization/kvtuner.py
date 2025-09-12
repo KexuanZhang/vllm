@@ -83,8 +83,8 @@ class KVTunerConfig(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 70  # Minimum compute capability for KVTuner
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return ["kvtuner_config.yaml"]
 
     @classmethod

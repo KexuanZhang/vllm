@@ -83,8 +83,8 @@ class ModelOptFp8Config(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 89
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return ["hf_quant_config.json"]
 
     def apply_vllm_mapper(self, hf_to_vllm_mapper: "WeightsMapper"):

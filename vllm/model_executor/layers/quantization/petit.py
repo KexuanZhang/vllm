@@ -76,8 +76,8 @@ class PetitNvFp4Config(QuantizationConfig):
         # Petit supports the gfx90a and gfx942 GPUs
         return 90
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return ["hf_quant_config.json"]
 
     @classmethod

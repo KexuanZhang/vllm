@@ -34,8 +34,8 @@ class ExpertsInt8Config(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 80
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return []
 
     @classmethod

@@ -84,8 +84,8 @@ class Mxfp4Config(QuantizationConfig):
     def get_supported_act_dtypes(cls) -> list[torch.dtype]:
         return [torch.bfloat16]
 
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
+    @staticmethod
+    def get_config_filenames() -> list[str]:
         return []
 
     def get_quant_method(self, layer: torch.nn.Module,
