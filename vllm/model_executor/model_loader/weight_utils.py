@@ -211,7 +211,7 @@ def get_quant_config(model_config: ModelConfig,
         model_config.model,
         revision=model_config.revision,
         download_dir=load_config.download_dir,
-        allow_patterns=["*.json"],
+        allow_patterns=["*.json", "*.yaml", "*.yml"],  # Allow YAML files for KVTuner
     ) or model_config.model
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:
@@ -220,7 +220,7 @@ def get_quant_config(model_config: ModelConfig,
             hf_folder = snapshot_download(
                 model_config.model,
                 revision=model_config.revision,
-                allow_patterns="*.json",
+                allow_patterns=["*.json", "*.yaml", "*.yml"],  # Allow YAML files for KVTuner
                 cache_dir=load_config.download_dir,
                 local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
                 tqdm_class=DisabledTqdm,
@@ -234,12 +234,38 @@ def get_quant_config(model_config: ModelConfig,
     if not possible_config_filenames:
         return quant_cls()
 
-    config_files = glob.glob(os.path.join(hf_folder, "*.json"))
+    # Debug logging for KVTuner
+    if model_config.quantization == "kvtuner":
+        logger.info(f"KVTuner: Searching for config files in: {hf_folder}")
+        logger.info(f"KVTuner: Expected filenames: {possible_config_filenames}")
+        try:
+            all_files = os.listdir(hf_folder)
+            config_like_files = [f for f in all_files if f.endswith(('.json', '.yaml', '.yml'))]
+            logger.info(f"KVTuner: All config-like files found: {config_like_files}")
+        except Exception as e:
+            logger.warning(f"KVTuner: Could not list directory {hf_folder}: {e}")
 
-    quant_config_files = [
-        f for f in config_files if any(
+    # Look for all files that match the config filenames, not just JSON files
+    config_files = []
+    for pattern in possible_config_filenames:
+        matching_files = glob.glob(os.path.join(hf_folder, pattern))
+        config_files.extend(matching_files)
+    
+    # Also look for JSON files that match the patterns (for backward compatibility)
+    json_files = glob.glob(os.path.join(hf_folder, "*.json"))
+    json_config_files = [
+        f for f in json_files if any(
             f.endswith(x) for x in possible_config_filenames)
     ]
+    config_files.extend(json_config_files)
+    
+    # Remove duplicates
+    quant_config_files = list(set(config_files))
+    
+    # Debug logging for KVTuner
+    if model_config.quantization == "kvtuner":
+        logger.info(f"KVTuner: Found config files: {quant_config_files}")
+    
     if len(quant_config_files) == 0:
         raise ValueError(
             f"Cannot find the config file for {model_config.quantization}")
@@ -249,18 +275,32 @@ def get_quant_config(model_config: ModelConfig,
             f"{quant_config_files}")
 
     quant_config_file = quant_config_files[0]
-    with open(quant_config_file) as f:
-        config = json.load(f)
+    
+    # Load config file based on extension
+    if quant_config_file.endswith('.yaml') or quant_config_file.endswith('.yml'):
+        # Handle YAML files (e.g., for KVTuner)
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError("PyYAML is required for YAML config files. Install with: pip install PyYAML")
+        
+        with open(quant_config_file) as f:
+            config = yaml.safe_load(f)
+    else:
+        # Handle JSON files (default)
+        with open(quant_config_file) as f:
+            config = json.load(f)
 
-        if model_config.quantization == "bitsandbytes":
-            config["adapter_name_or_path"] = model_config.model
-        elif model_config.quantization == "modelopt":
-            if config["producer"]["name"] == "modelopt":
-                return quant_cls.from_config(config)
-            else:
-                raise ValueError(
-                    f"Unsupported quantization config"
-                    f" found for {model_config.quantization} in {f}.")
+    # Apply special handling for specific quantization methods
+    if model_config.quantization == "bitsandbytes":
+        config["adapter_name_or_path"] = model_config.model
+    elif model_config.quantization == "modelopt":
+        if config.get("producer", {}).get("name") == "modelopt":
+            return quant_cls.from_config(config)
+        else:
+            raise ValueError(
+                f"Unsupported quantization config"
+                f" found for {model_config.quantization} in {quant_config_file}.")
 
     return quant_cls.from_config(config)
 
