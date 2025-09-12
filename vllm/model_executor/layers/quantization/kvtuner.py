@@ -125,13 +125,21 @@ class KVTunerConfig(QuantizationConfig):
             layer: The layer for the quant method.
             prefix: The full name of the layer in the state dict
         Returns:
-            The quantize method. For KVTuner, this returns None for most layers
-            since KVTuner primarily handles KV cache quantization through the
-            KV cache method rather than weight quantization.
+            The quantize method. For KVTuner, this returns UnquantizedLinearMethod
+            for linear layers since KVTuner primarily handles KV cache quantization
+            through the KV cache method rather than weight quantization.
         """
-        # KVTuner is primarily a KV cache quantization method,
-        # not a weight quantization method, so we return None for most layers.
-        # The KV cache quantization is handled through get_kv_cache_method()
+        from vllm.model_executor.layers.linear import (LinearBase, UnquantizedLinearMethod)
+        from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
+        
+        # KVTuner is primarily a KV cache quantization method, not a weight 
+        # quantization method. For linear layers, return UnquantizedLinearMethod
+        # to satisfy vLLM's requirement that get_quant_method() returns a valid method.
+        if isinstance(layer, (LinearBase, ParallelLMHead)):
+            return UnquantizedLinearMethod()
+        
+        # For other layer types, return None (KV cache quantization is handled 
+        # through get_kv_cache_method())
         return None
 
     def get_kv_cache_method(self) -> "KVTunerKVCacheMethod":
