@@ -15,10 +15,19 @@ logger = init_logger(__name__)
 
 # KVTuner integration requires the KVTuner package
 try:
-    # Add KVTuner path to sys.path if not already present
-    kvtuner_path = "/home/data/so2/KVTuner"
-    if kvtuner_path not in sys.path:
-        sys.path.insert(0, kvtuner_path)
+    # Try multiple possible KVTuner paths to improve worker process compatibility
+    possible_kvtuner_paths = [
+        "/Users/zhang/Desktop/huawei/untitled folder 6/KVTuner",
+        "/home/data/so2/KVTuner",
+        os.path.join(os.path.dirname(__file__), "../../../../../KVTuner"),
+        os.path.expanduser("~/KVTuner"),
+    ]
+    
+    # Add KVTuner paths to sys.path if not already present
+    for kvtuner_path in possible_kvtuner_paths:
+        if os.path.exists(kvtuner_path) and kvtuner_path not in sys.path:
+            sys.path.insert(0, kvtuner_path)
+            break
     
     from flexible_quant.flexible_quant.flexible_quantized_cache import (
         FlexibleQuantizedCacheConfig, 
@@ -31,6 +40,16 @@ try:
     logger.info("KVTuner integration enabled")
 except ImportError as e:
     logger.warning(f"KVTuner not available: {e}. Using standard KV cache.")
+    FlexibleQuantizedCacheConfig = None
+    FlexibleQuantizedCache = None
+    FlexibleVanillaQuantizedCache = None
+    FlexibleQuantoQuantizedCache = None
+    FlexibleHQQQuantizedCache = None
+    KVTUNER_AVAILABLE = False
+except Exception as e:
+    # Catch any other exceptions during KVTuner import to prevent worker crashes
+    logger.error(f"KVTuner import failed with unexpected error: {e}")
+    logger.warning("Falling back to standard KV cache")
     FlexibleQuantizedCacheConfig = None
     FlexibleQuantizedCache = None
     FlexibleVanillaQuantizedCache = None
@@ -56,16 +75,30 @@ class KVTunerCacheManager:
         self.kvtuner_cache = None
         self.kvtuner_cache_config = None
         
-        if (self.model_config.quantization == "kvtuner" and 
-            KVTUNER_AVAILABLE):
-            self._initialize_kvtuner_cache()
+        # Only attempt KVTuner initialization if it's requested and available
+        try:
+            if (self.model_config.quantization == "kvtuner" and 
+                KVTUNER_AVAILABLE):
+                self._initialize_kvtuner_cache()
+            elif self.model_config.quantization == "kvtuner" and not KVTUNER_AVAILABLE:
+                logger.warning("KVTuner quantization requested but not available. Using standard cache.")
+        except Exception as e:
+            logger.error(f"Failed to initialize KVTuner cache manager: {e}")
+            logger.warning("Falling back to standard cache")
+            self.kvtuner_cache = None
+            self.kvtuner_cache_config = None
     
     def _initialize_kvtuner_cache(self):
         """Initialize KVTuner quantized cache."""
         try:
+            # Check if required KVTuner attributes exist on cache_config
+            if not hasattr(self.cache_config, 'kvtuner_backend'):
+                logger.warning("KVTuner attributes not found on cache_config, skipping initialization")
+                return
+            
             # Create KVTuner cache configuration
             cache_config_kwargs = {
-                "backend": self.cache_config.kvtuner_backend,
+                "backend": getattr(self.cache_config, 'kvtuner_backend', 'vanilla'),
                 "nbits": -1,  # Use per-layer config
                 "nbits_key": -1,
                 "nbits_value": -1,
@@ -82,20 +115,26 @@ class KVTunerCacheManager:
             }
             
             # Load per-layer configuration if provided
-            if self.cache_config.kvtuner_config_path:
+            kvtuner_config_path = getattr(self.cache_config, 'kvtuner_config_path', None)
+            if kvtuner_config_path and os.path.exists(kvtuner_config_path):
                 import yaml
                 try:
-                    with open(self.cache_config.kvtuner_config_path, 'r') as f:
+                    with open(kvtuner_config_path, 'r') as f:
                         per_layer_config = yaml.safe_load(f)
                     cache_config_kwargs["per_layer_config"] = per_layer_config
-                    logger.info(f"Loaded KVTuner config from {self.cache_config.kvtuner_config_path}")
+                    logger.info(f"Loaded KVTuner config from {kvtuner_config_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load KVTuner config: {e}")
+            
+            # Only proceed if KVTuner classes are available
+            if not KVTUNER_AVAILABLE:
+                logger.warning("KVTuner classes not available, cannot initialize cache")
+                return
             
             self.kvtuner_cache_config = FlexibleQuantizedCacheConfig(**cache_config_kwargs)
             
             # Create appropriate cache based on backend
-            backend = self.cache_config.kvtuner_backend
+            backend = getattr(self.cache_config, 'kvtuner_backend', 'vanilla')
             if backend == "vanilla":
                 self.kvtuner_cache = FlexibleVanillaQuantizedCache(self.kvtuner_cache_config)
             elif backend == "quanto":
