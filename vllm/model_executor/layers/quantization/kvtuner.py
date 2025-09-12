@@ -143,7 +143,7 @@ class KVTunerKVCacheMethod(BaseKVCacheMethod):
     """KV cache method for KVTuner quantization."""
 
     def __init__(self, config: KVTunerConfig):
-        super().__init__()
+        super().__init__(config)
         self.config = config
 
     def get_kv_cache_shape(
@@ -188,3 +188,34 @@ class KVTunerKVCacheMethod(BaseKVCacheMethod):
         # For KVTuner, we keep the same block size for simplicity
         # The quantization savings come from the mixed precision per layer
         return block_size
+
+    def create_weights(self, layer: torch.nn.Module):
+        """Create weight parameters for KVTuner quantization."""
+        # KVTuner handles quantization differently, but we still need to initialize
+        # scaling parameters for compatibility with vLLM's KV cache system
+        layer.q_scale = torch.nn.Parameter(torch.tensor(1.0), requires_grad=False)
+        layer.k_scale = torch.nn.Parameter(torch.tensor(1.0), requires_grad=False) 
+        layer.v_scale = torch.nn.Parameter(torch.tensor(1.0), requires_grad=False)
+        # Initialize probability scaling parameter  
+        layer.prob_scale = torch.nn.Parameter(torch.tensor(1.0), requires_grad=False)
+
+    def apply(self, layer: torch.nn.Module) -> torch.Tensor:
+        """Apply KVTuner quantization method."""
+        # KVTuner quantization is applied during attention computation, not here
+        # This method is typically called during model initialization
+        return torch.tensor(0.0)  # Return dummy tensor for compatibility
+
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        """Process weights after loading for KVTuner."""
+        # KVTuner configuration is handled through the per-layer config
+        # Ensure scaling factors are properly set for this layer
+        if hasattr(layer, 'k_scale') and hasattr(layer, 'v_scale'):
+            # Set default scales if not already configured
+            if layer.k_scale.item() == -1.0:
+                layer.k_scale.data.fill_(1.0)
+            if layer.v_scale.item() == -1.0:
+                layer.v_scale.data.fill_(1.0)
+            if hasattr(layer, 'q_scale') and layer.q_scale.item() == -1.0:
+                layer.q_scale.data.fill_(1.0)
+            if hasattr(layer, 'prob_scale') and layer.prob_scale.item() == -1.0:
+                layer.prob_scale.data.fill_(1.0)
