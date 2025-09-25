@@ -90,10 +90,15 @@ class KVTunerConfig(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from vllm.attention.layer import Attention
+        from vllm.model_executor.layers.linear import UnquantizedLinearMethod
         
+        # KVTuner only applies to attention layers for KV cache quantization
         if isinstance(layer, Attention):
             return KVTunerMethod(self, prefix)
-        return None
+        
+        # For all other layers (linear, etc.), use unquantized method
+        # KVTuner only quantizes KV cache, not weights
+        return UnquantizedLinearMethod()
 
 
 class KVTunerMethod(QuantizeMethodBase):
