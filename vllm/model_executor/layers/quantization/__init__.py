@@ -35,6 +35,7 @@ QuantizationMethods = Literal[
     "inc",
     "mxfp4",
     "petit_nvfp4",
+    "kvtuner",
 ]
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -106,6 +107,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
     from .ipex_quant import IPEXConfig
     from .modelopt import ModelOptFp8Config, ModelOptNvFp4Config
     from .moe_wna16 import MoeWNA16Config
+    from .kvtuner import KVTunerConfig
     from .mxfp4 import Mxfp4Config
     from .petit import PetitNvFp4Config
     from .ptpc_fp8 import PTPCFp8Config
@@ -140,6 +142,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
         "auto-round": AutoRoundConfig,
         "rtn": RTNConfig,
         "inc": INCConfig,
+        "kvtuner": KVTunerConfig,
         "mxfp4": Mxfp4Config,
         "petit_nvfp4": PetitNvFp4Config,
     }

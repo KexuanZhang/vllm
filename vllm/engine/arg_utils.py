@@ -360,6 +360,9 @@ class EngineArgs:
     hf_overrides: HfOverrides = get_field(ModelConfig, "hf_overrides")
     tokenizer_revision: Optional[str] = ModelConfig.tokenizer_revision
     quantization: Optional[QuantizationMethods] = ModelConfig.quantization
+    # KVTuner specific arguments
+    kvtuner_preset_path: Optional[str] = None
+    kvtuner_method: str = "kivi"
     enforce_eager: bool = ModelConfig.enforce_eager
     max_seq_len_to_capture: int = ModelConfig.max_seq_len_to_capture
     disable_custom_all_reduce: bool = ParallelConfig.disable_custom_all_reduce
@@ -527,6 +530,16 @@ class EngineArgs:
                                  **model_kwargs["max_model_len"])
         model_group.add_argument("--quantization", "-q",
                                  **model_kwargs["quantization"])
+        # KVTuner specific arguments
+        model_group.add_argument("--kvtuner-preset-path",
+                                 type=str,
+                                 default=None,
+                                 help="Path to KVTuner calibration preset YAML file")
+        model_group.add_argument("--kvtuner-method",
+                                 type=str,
+                                 choices=["kivi", "pertoken"],
+                                 default="kivi",
+                                 help="KVTuner quantization method")
         model_group.add_argument("--enforce-eager",
                                  **model_kwargs["enforce_eager"])
         model_group.add_argument("--max-seq-len-to-capture",
@@ -1112,6 +1125,13 @@ class EngineArgs:
         If VLLM_USE_V1 is specified by the user but the VllmConfig
         is incompatible, we raise an error.
         """
+        # Set KVTuner environment variables if using KVTuner quantization
+        if self.quantization == "kvtuner":
+            import os
+            if self.kvtuner_preset_path:
+                os.environ['VLLM_KVTUNER_PRESET_PATH'] = self.kvtuner_preset_path
+            os.environ['VLLM_KVTUNER_METHOD'] = self.kvtuner_method
+        
         current_platform.pre_register_and_update()
 
         device_config = DeviceConfig(

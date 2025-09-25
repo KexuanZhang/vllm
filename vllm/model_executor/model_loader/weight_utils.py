@@ -187,6 +187,22 @@ def get_quant_config(model_config: ModelConfig,
 
     quant_cls = get_quantization_config(model_config.quantization)
 
+    # Handle KVTuner quantization
+    if model_config.quantization == "kvtuner":
+        # Import here to avoid circular imports
+        import os
+        kvtuner_config = {}
+        
+        # Check for KVTuner parameters in environment variables (set by EngineArgs)
+        kvtuner_preset_path = os.environ.get('VLLM_KVTUNER_PRESET_PATH')
+        kvtuner_method = os.environ.get('VLLM_KVTUNER_METHOD', 'kivi')
+        
+        if kvtuner_preset_path:
+            kvtuner_config['preset_path'] = kvtuner_preset_path
+        kvtuner_config['method'] = kvtuner_method
+        
+        return quant_cls(**kvtuner_config)
+
     # GGUF doesn't have config file
     if model_config.quantization in ("gguf", "inc"):
         return quant_cls()

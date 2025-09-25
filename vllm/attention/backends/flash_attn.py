@@ -670,13 +670,32 @@ class FlashAttentionImpl(AttentionImpl):
                     # Update self-attention KV cache (prefill/decode)
                     updated_slot_mapping = attn_metadata.slot_mapping
 
+                # Check for KVTuner quantization
+                if hasattr(layer, 'use_kvtuner') and layer.use_kvtuner:
+                    # Apply KVTuner quantization before caching
+                    quantized_key, k_scale = layer.kvtuner_quantize_key(key)
+                    quantized_value, v_scale = layer.kvtuner_quantize_value(value)
+                    
+                    # Use quantized tensors for caching
+                    cache_key = quantized_key
+                    cache_value = quantized_value
+                    
+                    # Store scales for later dequantization (could be stored in metadata)
+                    # For now, we'll store in layer attributes
+                    layer._kvtuner_last_k_scale = k_scale
+                    layer._kvtuner_last_v_scale = v_scale
+                else:
+                    # Use original tensors for non-KVTuner quantization
+                    cache_key = key
+                    cache_value = value
+                
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
-                    key,
-                    value,
+                    cache_key,
+                    cache_value,
                     kv_cache[0],
                     kv_cache[1],
                     updated_slot_mapping.flatten(),  # type: ignore[union-attr]
