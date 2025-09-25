@@ -9,6 +9,7 @@ import re
 
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
+from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -111,10 +112,11 @@ class KVTunerConfig(QuantizationConfig):
         return None
 
 
-class KVTunerMethod(QuantizeMethodBase):
+class KVTunerMethod(BaseKVCacheMethod):
     """KVTuner implementation using bit-precision quantization paradigm."""
     
     def __init__(self, quant_config: KVTunerConfig, layer_prefix: str):
+        super().__init__(quant_config)
         self.quant_config = quant_config
         self.method = quant_config.method
         self.layer_configs = quant_config.layer_configs
@@ -133,6 +135,9 @@ class KVTunerMethod(QuantizeMethodBase):
 
     def create_weights(self, layer: torch.nn.Module):
         """Create KVTuner-specific parameters."""
+        
+        # Call parent to create the scale parameters (required by BaseKVCacheMethod)
+        super().create_weights(layer)
         
         # Store the actual calibrated bit configurations
         layer.kvtuner_nbits_key = self.layer_config['nbits_key']
@@ -160,6 +165,16 @@ class KVTunerMethod(QuantizeMethodBase):
 
     def process_weights_after_loading(self, layer: torch.nn.Module):
         """Set up KVTuner runtime quantization functions."""
+        
+        # KVTuner uses dynamic scaling, not fixed scales from checkpoints
+        # Set the scale parameters to default values since we compute them dynamically
+        layer.k_scale.fill_(1.0)
+        layer.v_scale.fill_(1.0) 
+        layer.q_scale.fill_(1.0)
+        layer.prob_scale.fill_(1.0)
+        
+        # Call parent to set up the scale infrastructure
+        super().process_weights_after_loading(layer)
         
         k_bits = layer.kvtuner_nbits_key
         v_bits = layer.kvtuner_nbits_value
