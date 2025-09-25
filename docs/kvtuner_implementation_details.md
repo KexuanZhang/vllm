@@ -90,7 +90,7 @@ class KVTunerConfig(QuantizationConfig):
 #### KVTunerMethod Class
 
 ```python
-class KVTunerMethod(QuantizeMethodBase):
+class KVTunerMethod(BaseKVCacheMethod):
     """KVTuner implementation using bit-precision quantization paradigm."""
 ```
 
@@ -99,8 +99,10 @@ class KVTunerMethod(QuantizeMethodBase):
 - **Bit-Based Quantization**: Uses quantization ranges, not scales
 - **Dynamic Functions**: Creates quantization functions at runtime
 - **PyTorch Operations**: Pure tensor operations, no custom kernels
+- **BaseKVCacheMethod Compliance**: Inherits from BaseKVCacheMethod for attention layer compatibility
 
-**Why Not BaseKVCacheMethod?**:
+**Implementation Evolution**:
+Initially, we attempted to bypass BaseKVCacheMethod due to paradigm differences:
 ```python
 # BaseKVCacheMethod expects:
 layer.k_scale = torch.tensor(0.125)  # Float scale from checkpoint
@@ -112,7 +114,7 @@ layer_config = {
 }
 ```
 
-The fundamental mismatch between scale-based and bit-precision paradigms required a custom implementation.
+However, vLLM's attention layer requires `isinstance(quant_method, BaseKVCacheMethod)`, so we adapted KVTuner to inherit from BaseKVCacheMethod while overriding its scale-based approach with bit-precision quantization.
 
 ### 2. Quantization System Registration
 
@@ -316,21 +318,38 @@ Attention Forward → KVTuner Detection → Quantize → Store → Dequantize �
 
 ## Design Decisions
 
-### 1. Bypass BaseKVCacheMethod
+### 1. Inherit from BaseKVCacheMethod (Updated Approach)
 
-**Decision**: Create custom KVTunerMethod instead of extending BaseKVCacheMethod
+**Decision**: Extend BaseKVCacheMethod while overriding scale-based behavior
 
 **Rationale**:
-- BaseKVCacheMethod assumes scale-based quantization from checkpoints
-- KVTuner uses bit-precision with dynamic scaling
-- Fundamental paradigm mismatch would require extensive workarounds
-- Custom implementation is cleaner and more maintainable
+- vLLM's attention layer enforces `isinstance(quant_method, BaseKVCacheMethod)`
+- Must satisfy this requirement for integration compatibility
+- Override scale-based methods with bit-precision implementations
+- Maintain KVTuner's paradigm within vLLM's architectural constraints
+
+**Implementation Strategy**:
+```python
+class KVTunerMethod(BaseKVCacheMethod):
+    def create_weights(self, layer: torch.nn.Module):
+        # Call parent to satisfy interface requirements
+        super().create_weights(layer)
+        # Override with KVTuner bit-precision setup
+        layer.kvtuner_nbits_key = self.layer_config['nbits_key']
+        # Set dummy scales for BaseKVCacheMethod compatibility
+        layer.k_scale = torch.tensor(1.0)
+        
+    def process_weights_after_loading(self, layer: torch.nn.Module):
+        # Override parent's scale-based approach
+        # Implement KVTuner's dynamic quantization functions
+```
 
 **Trade-offs**:
-- ✅ Clean implementation respecting KVTuner's design
-- ✅ No forced compatibility with incompatible patterns
-- ❌ Doesn't reuse some BaseKVCacheMethod infrastructure
-- ❌ Parallel implementation path
+- ✅ Full compatibility with vLLM's attention system
+- ✅ Leverages existing BaseKVCacheMethod infrastructure  
+- ✅ Maintains KVTuner's bit-precision paradigm
+- ❌ Some overhead from unused scale mechanisms
+- ❌ More complex inheritance hierarchy
 
 ### 2. Pure PyTorch Implementation
 
@@ -446,6 +465,82 @@ layer_configs = {
 - **Documentation**: ~400 lines
 - **Total**: ~1400 lines
 
+## Implementation Challenges and Solutions
+
+### 1. Linear Layer Quantization Method Issue
+
+**Problem**: 
+```
+AssertionError: assert self.quant_method is not None
+```
+
+**Root Cause**: Linear layers (like `QKVParallelLinear`) expected a quantization method, but KVTuner initially only returned methods for attention layers.
+
+**Solution**: Enhanced `get_quant_method()` to return appropriate methods for different layer types:
+```python
+def get_quant_method(self, layer: torch.nn.Module, prefix: str):
+    if isinstance(layer, Attention):
+        return KVTunerMethod(self, prefix)
+    elif isinstance(layer, (VocabParallelEmbedding, ParallelLMHead)):
+        return UnquantizedEmbeddingMethod()
+    elif isinstance(layer, LinearBase):
+        return UnquantizedLinearMethod()
+    return None
+```
+
+### 2. Embedding Layer Method Mismatch
+
+**Problem**:
+```
+NotImplementedError: The class UnquantizedLinearMethod must implement the 'embedding' method
+```
+
+**Root Cause**: Embedding layers require `UnquantizedEmbeddingMethod`, not `UnquantizedLinearMethod`.
+
+**Solution**: Added specific handling for embedding layer types with proper method selection.
+
+### 3. Attention Layer BaseKVCacheMethod Requirement
+
+**Problem**:
+```
+AssertionError: assert isinstance(quant_method, BaseKVCacheMethod)
+```
+
+**Root Cause**: vLLM's attention layer enforces that quantization methods must inherit from `BaseKVCacheMethod`.
+
+**Solution**: Changed KVTunerMethod inheritance:
+```python
+# Before: 
+class KVTunerMethod(QuantizeMethodBase)
+
+# After:
+class KVTunerMethod(BaseKVCacheMethod)
+```
+
+And overrode the scale-based methods with bit-precision implementations while maintaining interface compatibility.
+
+### 4. Layer Type Detection and Handling
+
+**Challenge**: Ensuring all layer types get appropriate quantization methods without breaking existing functionality.
+
+**Solution**: Comprehensive layer type checking:
+```python
+# Handle attention layers with KVTuner
+if isinstance(layer, Attention):
+    return KVTunerMethod(self, prefix)
+
+# Handle embedding layers properly  
+if isinstance(layer, (VocabParallelEmbedding, ParallelLMHead)):
+    return UnquantizedEmbeddingMethod()
+
+# Handle linear layers
+if isinstance(layer, LinearBase):
+    return UnquantizedLinearMethod()
+
+# Default fallback
+return None
+```
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -512,6 +607,39 @@ Expected memory reductions based on bit precision:
 3. **Memory Layout**: Optimized tensor formats for quantized data
 4. **Batch Processing**: Vectorized quantization operations
 
+## Final Architecture Overview
+
+After resolving all implementation challenges, the final KVTuner integration follows this architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        vLLM Integration                         │
+├─────────────────────────────────────────────────────────────────┤
+│  CLI Args  │  QuantConfig  │   Layer Detection & Method Selection │
+│  ──────────│──────────────│─────────────────────────────────────│
+│ --quantization kvtuner    │                                     │
+│ --kvtuner-preset-path     │   Attention Layer ──► KVTunerMethod │
+│ --kvtuner-method kivi     │   Embedding Layer ──► UnquantizedEmbeddingMethod │
+│                           │   Linear Layer    ──► UnquantizedLinearMethod │
+├─────────────────────────────────────────────────────────────────┤
+│                     KVTuner Implementation                      │
+├─────────────────────────────────────────────────────────────────┤
+│  KVTunerConfig           │  KVTunerMethod (extends BaseKVCacheMethod) │
+│  ──────────────          │  ─────────────────────────────────────────│
+│  • YAML preset loading   │  • Layer-specific bit configurations      │
+│  • Method validation     │  • Dynamic quantization functions         │
+│  • Layer configurations  │  • PyTorch-based implementation          │
+│                          │  • BaseKVCacheMethod compatibility        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Integration Points:
+
+1. **Configuration Layer**: CLI arguments → Environment variables → KVTunerConfig
+2. **Method Selection**: Layer-type-aware quantization method assignment  
+3. **Attention Integration**: KVTunerMethod handles KV cache quantization
+4. **Fallback Support**: Non-attention layers use appropriate unquantized methods
+
 ## Future Enhancements
 
 ### 1. Custom CUDA Kernels
@@ -553,12 +681,30 @@ __global__ void kvtuner_attention_kernel(
 
 ## Conclusion
 
-The KVTuner integration into vLLM demonstrates how research-oriented quantization methods can be successfully integrated into production inference systems. Key success factors:
+The KVTuner integration into vLLM demonstrates how research-oriented quantization methods can be successfully integrated into production inference systems, despite architectural constraints. Key success factors and lessons learned:
 
-1. **Respecting Design Paradigms**: Not forcing KVTuner into incompatible patterns
-2. **Minimal Invasiveness**: Small, focused changes to existing codebase
-3. **Extensible Architecture**: Easy to add new methods and optimizations
-4. **Production Ready**: Complete with CLI, testing, and documentation
-5. **Performance Conscious**: Designed for optimization while maintaining functionality
+### Success Factors:
 
-This implementation provides a solid foundation for advanced KV cache quantization in vLLM while maintaining the system's performance, reliability, and usability standards.
+1. **Adaptive Integration Strategy**: Initially attempted to bypass BaseKVCacheMethod, but adapted to inherit from it when architectural constraints required it
+2. **Comprehensive Layer Handling**: Proper type detection ensures all layer types receive appropriate quantization methods
+3. **Iterative Problem Solving**: Each error revealed integration requirements, leading to robust final implementation
+4. **Minimal Invasiveness**: Despite complexity, changes remain focused and non-disruptive to existing codebase
+5. **Production Ready**: Complete with CLI, testing, documentation, and error handling
+
+### Lessons Learned:
+
+1. **Architectural Constraints Matter**: vLLM's `isinstance(quant_method, BaseKVCacheMethod)` check required inheritance adaptation
+2. **Layer Type Diversity**: Different layer types (attention, embedding, linear) need specific quantization method types
+3. **Interface Compliance vs. Paradigm Mismatch**: Sometimes architectural compatibility requires working within existing patterns while overriding behavior
+4. **Comprehensive Error Handling**: Each runtime error revealed another integration requirement
+5. **Documentation is Crucial**: Complex integrations require detailed documentation for maintenance and extension
+
+### Final Architecture Benefits:
+
+- ✅ **Full vLLM Compatibility**: Works seamlessly with existing attention systems
+- ✅ **KVTuner Paradigm Preserved**: Bit-precision quantization with layer-specific configurations
+- ✅ **Extensible Design**: Easy to add new quantization methods and optimizations  
+- ✅ **Production Ready**: Robust error handling, CLI support, and comprehensive testing
+- ✅ **Performance Optimized**: Clear path for CUDA kernel optimizations
+
+This implementation provides a solid foundation for advanced KV cache quantization in vLLM while demonstrating how to successfully integrate research frameworks into production systems with strong architectural constraints.
