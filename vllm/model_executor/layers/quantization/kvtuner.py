@@ -90,15 +90,25 @@ class KVTunerConfig(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from vllm.attention.layer import Attention
-        from vllm.model_executor.layers.linear import UnquantizedLinearMethod
+        from vllm.model_executor.layers.linear import LinearBase, UnquantizedLinearMethod
+        from vllm.model_executor.layers.vocab_parallel_embedding import (
+            UnquantizedEmbeddingMethod, VocabParallelEmbedding, ParallelLMHead
+        )
         
         # KVTuner only applies to attention layers for KV cache quantization
         if isinstance(layer, Attention):
             return KVTunerMethod(self, prefix)
         
-        # For all other layers (linear, etc.), use unquantized method
-        # KVTuner only quantizes KV cache, not weights
-        return UnquantizedLinearMethod()
+        # For embedding layers (including ParallelLMHead), use UnquantizedEmbeddingMethod
+        if isinstance(layer, (VocabParallelEmbedding, ParallelLMHead)):
+            return UnquantizedEmbeddingMethod()
+        
+        # For linear layers, use UnquantizedLinearMethod
+        if isinstance(layer, LinearBase):
+            return UnquantizedLinearMethod()
+        
+        # For all other layers, return None (will use default handling)
+        return None
 
 
 class KVTunerMethod(QuantizeMethodBase):
