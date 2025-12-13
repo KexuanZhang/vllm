@@ -1,0 +1,14 @@
+{
+  "no_log": {
+    "wall_time_sec": 2.354,
+    "tokens_generated": 2878,
+    "throughput_tokens_per_sec": 1222.45,
+    "num_prompts": 25
+  },
+  "log": {
+    "wall_time_sec": 2.37,
+    "tokens_generated": 2878,
+    "throughput_tokens_per_sec": 1214.44,
+    "num_prompts": 25
+  }
+}

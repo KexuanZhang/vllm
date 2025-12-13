@@ -421,6 +421,7 @@ class LLM:
             considered legacy and may be deprecated in the future. You should
             instead pass them via the `inputs` parameter.
         """
+        print("[DEBUG] LLM.generate called")
         model_config = self.model_config
         runner_type = model_config.runner_type
         if runner_type != "generate":

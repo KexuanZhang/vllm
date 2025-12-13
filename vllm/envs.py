@@ -245,6 +245,13 @@ if TYPE_CHECKING:
     VLLM_COMPILE_CACHE_SAVE_FORMAT: Literal["binary", "unpacked"] = "binary"
     VLLM_USE_V2_MODEL_RUNNER: bool = False
 
+    # Moe expert logging env variables
+
+    # logging path to jsonl file
+    VLLM_LOG_MOE: str = ""
+    # logging layer
+    VLLM_LOG_MOE_LAYERS: str = "0"
+
 
 def get_default_cache_root():
     return os.getenv(
@@ -1565,6 +1572,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_USE_V2_MODEL_RUNNER": lambda: bool(
         int(os.getenv("VLLM_USE_V2_MODEL_RUNNER", "0"))
     ),
+    # MoE expert logging: path to JSONL log file (empty string = disabled)
+    # Set to a file path to enable logging of expert selections per token.
+    # Example: VLLM_LOG_MOE=/tmp/moe_routes.jsonl
+    "VLLM_LOG_MOE": lambda: os.getenv("VLLM_LOG_MOE", ""),
+    # Comma-separated list of MoE layer indices to log (default: "0")
+    # Example: VLLM_LOG_MOE_LAYERS=0,1,2 to log first three layers
+    "VLLM_LOG_MOE_LAYERS": lambda: os.getenv("VLLM_LOG_MOE_LAYERS", "0"),
 }
 
 # --8<-- [end:env-vars-definition]

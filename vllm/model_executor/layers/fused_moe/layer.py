@@ -88,6 +88,134 @@ from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
 
 logger = init_logger(__name__)
 
+#################################################
+# Moe logger helper functions
+#################################################
+import atexit
+import os
+import json
+import vllm
+import re
+
+# Global variables
+LOG_FILE = None
+LOG_LAYER: set[int] = set()
+TOKEN_COUNTER = 0
+HEADER_FLAG = False
+REQ_COUNTER = 0
+
+
+def init_moe_logger():
+    """Helper function to initialize the logger"""
+    global LOG_FILE, LOG_LAYER
+    
+    log_path = os.environ.get("VLLM_LOG_MOE", "")
+    if not log_path:
+        return
+    
+    # Parse layer in config
+    layers_str = os.environ.get("VLLM_LOG_MOE_LAYERS", "0")
+    try:
+        LOG_LAYER = {int(x.strip()) for x in layers_str.split(",") if x.strip()}
+    except ValueError:
+        LOG_LAYER = {0}
+    
+    # Load the log file for future write
+    try:
+        LOG_FILE = open(log_path, 'w')
+        atexit.register(lambda: LOG_FILE.close() if LOG_FILE else None)
+        logger.info(f"MoE logging enabled: {log_path}, layers: {LOG_LAYER}")
+    except IOError as e:
+        logger.error(f"Failed to open MoE log file: {e}")
+
+
+def write_header(top_k: int):
+    """Helper function to write the header. Only write once."""
+    global LOG_FILE, LOG_LAYER, HEADER_FLAG
+    
+    # Pass if header is already written
+    if HEADER_FLAG or LOG_FILE is None:
+        return
+    
+    
+    header = {
+        "type": "meta",
+        "model_id": "Qwen/Qwen1.5-MoE-A2.7B-Chat",
+        "vllm_version": getattr(vllm, "__version__", "unknown"),
+        "torch_version": torch.__version__,
+        "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "seed": 1234,
+        "layers_logged": sorted(LOG_LAYER),
+        "top_k": top_k,
+    }
+    LOG_FILE.write(json.dumps(header) + "\n")
+    LOG_FILE.flush()
+
+    # Update flag as header is written
+    HEADER_FLAG = True
+
+
+def log_expert_selection(
+    layer_name: str,
+    topk_ids: torch.Tensor,
+    topk_weights: torch.Tensor,
+    top_k: int,
+):
+    """Log expert selections if MoE logging is enabled."""
+    global LOG_FILE, LOG_LAYER, TOKEN_COUNTER, REQ_COUNTER
+    
+    # Initialize logger on first call
+    if LOG_FILE is None and LOG_LAYER == set():
+        init_moe_logger()
+    
+    if LOG_FILE is None:
+        return
+    
+    # Write header on first actual log
+    write_header(top_k)
+    
+    # Extract layer index from layer_name
+    match = re.search(r'layers\.(\d+)', layer_name)
+    layer_idx = int(match.group(1)) if match else -1
+    
+    if layer_idx not in LOG_LAYER:
+        return
+    
+    # Skip during CUDA graph capture
+    if torch.cuda.is_available():
+        try:
+            if torch.cuda.is_current_stream_capturing():
+                return
+        except RuntimeError:
+            pass
+    
+    try:
+        ids_cpu = topk_ids.detach().cpu().tolist()
+        weights_cpu = topk_weights.detach().cpu().tolist()
+    except Exception:
+        return
+    
+    # Generate req_id for each forward pass
+    req_id = f"r{REQ_COUNTER}"
+    
+    # Perform token level logging
+    for i in range(len(ids_cpu)):
+        record = {
+            "type": "route",
+            "req_id": req_id,
+            "token_idx": TOKEN_COUNTER,
+            "layer": layer_idx,
+            "topk_ids": ids_cpu[i],
+            "topk_weights": [round(w, 4) for w in weights_cpu[i]],
+        }
+        LOG_FILE.write(json.dumps(record) + "\n")
+        TOKEN_COUNTER += 1
+    
+    LOG_FILE.flush()
+    REQ_COUNTER += 1
+
+# ============================================================================
+
 
 class FusedMoeWeightScaleSupported(Enum):
     TENSOR = "tensor"
@@ -1622,11 +1750,14 @@ class FusedMoE(CustomOp):
             )
         else:
             topk_weights, topk_ids = self.custom_routing_function(
-                hidden_states=hidden_states,
+                            hidden_states=hidden_states,
                 gating_output=router_logits,
                 topk=self.top_k,
                 renormalize=self.renormalize,
             )
+
+        # MoE expert selection logging hook
+        log_expert_selection(self.layer_name, topk_ids, topk_weights, self.top_k)
 
         if self.enable_eplb:
             topk_ids = eplb_map_to_physical_and_record(
@@ -1657,6 +1788,8 @@ class FusedMoE(CustomOp):
             )
         else:
             zero_expert_result = None
+
+        # print(f"[DEBUG] topk_ids: {topk_ids}, topk_weights: {topk_weights}")
         return topk_weights, topk_ids, zero_expert_result
 
     def must_reduce_shared_expert_outputs(self) -> bool:
