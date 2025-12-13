@@ -1,4 +1,4 @@
-# Takehome Task Summary [Kexuan ZHang]
+# Takehome Task Summary [Kexuan Zhang]
 
 ## Code Modification
 
